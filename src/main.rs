@@ -26,6 +26,9 @@ const WINDOW_SIZE: egui::Vec2 = egui::vec2(theme::COLLAPSED_WIDTH, theme::COLLAP
 /// Padding between the pill edge and page content.
 const CONTENT_PADDING: egui::Vec2 = egui::vec2(24.0, 12.0);
 
+/// Wheel movement (points) needed to switch one page.
+const SCROLL_THRESHOLD: f32 = 20.0;
+
 struct UmbraApp {
     island: Island,
     pages: PageStack,
@@ -34,6 +37,8 @@ struct UmbraApp {
     window_size: egui::Vec2,
     /// Last window x position sent to the OS.
     window_x: Option<f32>,
+    scroll_accum: f32,
+    last_scroll_nav: f64,
 }
 
 impl UmbraApp {
@@ -51,6 +56,8 @@ impl UmbraApp {
             clock: Clock::new(),
             window_size: WINDOW_SIZE,
             window_x: None,
+            scroll_accum: 0.0,
+            last_scroll_nav: f64::NEG_INFINITY,
         }
     }
 
@@ -75,6 +82,63 @@ impl UmbraApp {
         if self.window_x != Some(x) {
             ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(x, 0.0)));
             self.window_x = Some(x);
+        }
+    }
+
+    /// Page dots along the bottom edge; click one to jump to that page.
+    fn draw_dots(&mut self, ui: &mut egui::Ui, pill: egui::Rect, alpha: f32) {
+        const SPACING: f32 = 14.0;
+        let count = self.pages.len();
+        let y = pill.bottom() - 8.0;
+        let start = pill.center().x - SPACING * (count as f32 - 1.0) / 2.0;
+        for i in 0..count {
+            let center = egui::pos2(start + SPACING * i as f32, y);
+            let active = i == self.pages.current_index();
+            let (color, radius) = if active {
+                (theme::ACCENT, 3.0)
+            } else {
+                (theme::TEXT_SECONDARY, 2.5)
+            };
+            ui.painter()
+                .circle_filled(center, radius, widgets::fade(color, alpha));
+            let hit = egui::Rect::from_center_size(center, egui::vec2(SPACING, SPACING));
+            if widgets::click_area(ui, hit, &format!("dot{i}"), alpha) {
+                self.pages.select(i);
+            }
+        }
+    }
+
+    /// Mouse wheel and arrow keys switch pages while the island is open.
+    fn handle_navigation(&mut self, ctx: &egui::Context, now: f64) {
+        if !self.island.wants_expanded() || ctx.wants_keyboard_input() {
+            self.scroll_accum = 0.0;
+            return;
+        }
+        let (left, right, scroll) = ctx.input(|i| {
+            (
+                i.key_pressed(egui::Key::ArrowLeft),
+                i.key_pressed(egui::Key::ArrowRight),
+                // Treat vertical wheel and horizontal scroll alike.
+                i.raw_scroll_delta.y + i.raw_scroll_delta.x,
+            )
+        });
+        if left {
+            self.pages.prev();
+        }
+        if right {
+            self.pages.next();
+        }
+        // Accumulate wheel movement; one page per notch, with a short cooldown
+        // so a fast spin or trackpad inertia doesn't skip several pages.
+        self.scroll_accum += scroll;
+        if self.scroll_accum.abs() >= SCROLL_THRESHOLD && now - self.last_scroll_nav > 0.25 {
+            if self.scroll_accum < 0.0 {
+                self.pages.next();
+            } else {
+                self.pages.prev();
+            }
+            self.last_scroll_nav = now;
+            self.scroll_accum = 0.0;
         }
     }
 
@@ -117,7 +181,8 @@ impl UmbraApp {
             );
             let mut child = ui.new_child(egui::UiBuilder::new().max_rect(content));
             child.set_clip_rect(rect.intersect(ui.clip_rect()));
-            self.pages.current_mut().draw(&mut child, alpha);
+            self.pages.draw(&mut child, alpha);
+            self.draw_dots(ui, rect, alpha);
         }
     }
 }
@@ -131,6 +196,8 @@ impl eframe::App for UmbraApp {
         let (dt, now) = ctx.input(|i| (i.stable_dt, i.time));
         self.island.update(dt);
         self.pages.tick_all(now);
+        self.handle_navigation(ctx, now);
+        let fading = self.pages.update(dt);
         self.fit_window_to_pill(ctx);
 
         egui::CentralPanel::default()
@@ -148,7 +215,7 @@ impl eframe::App for UmbraApp {
             }
         }
         // Repaint continuously only while a spring is moving.
-        if self.island.is_animating() {
+        if self.island.is_animating() || fading {
             ctx.request_repaint();
         }
     }

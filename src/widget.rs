@@ -33,15 +33,27 @@ pub trait Widget {
 }
 
 /// An ordered set of pages with a current selection.
+/// Duration of the page crossfade in seconds.
+pub const FADE_SECONDS: f32 = 0.2;
+
 pub struct PageStack {
     pages: Vec<Box<dyn Widget>>,
     current: usize,
+    /// Page being faded out, if a transition is running.
+    outgoing: Option<usize>,
+    /// Crossfade progress, 0.0 (just switched) to 1.0 (done).
+    fade: f32,
 }
 
 impl PageStack {
     pub fn new(pages: Vec<Box<dyn Widget>>) -> Self {
         assert!(!pages.is_empty(), "page stack needs at least one page");
-        Self { pages, current: 0 }
+        Self {
+            pages,
+            current: 0,
+            outgoing: None,
+            fade: 1.0,
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -52,19 +64,21 @@ impl PageStack {
         self.current
     }
 
-    /// Select a page by index; out-of-range indices are ignored.
+    /// Select a page by index, starting a crossfade; out-of-range indices are ignored.
     pub fn select(&mut self, index: usize) {
-        if index < self.pages.len() {
+        if index < self.pages.len() && index != self.current {
+            self.outgoing = Some(self.current);
+            self.fade = 0.0;
             self.current = index;
         }
     }
 
     pub fn next(&mut self) {
-        self.current = (self.current + 1) % self.pages.len();
+        self.select((self.current + 1) % self.pages.len());
     }
 
     pub fn prev(&mut self) {
-        self.current = (self.current + self.pages.len() - 1) % self.pages.len();
+        self.select((self.current + self.pages.len() - 1) % self.pages.len());
     }
 
     pub fn page(&self, index: usize) -> &dyn Widget {
@@ -77,6 +91,37 @@ impl PageStack {
 
     pub fn page_mut(&mut self, index: usize) -> &mut dyn Widget {
         self.pages[index].as_mut()
+    }
+
+    /// Advance the crossfade. Returns true while it is still running.
+    pub fn update(&mut self, dt: f32) -> bool {
+        if self.outgoing.is_some() {
+            self.fade = (self.fade + dt / FADE_SECONDS).min(1.0);
+            if self.fade >= 1.0 {
+                self.outgoing = None;
+            }
+        }
+        self.outgoing.is_some()
+    }
+
+    /// Draw the current page, plus the outgoing one while crossfading.
+    pub fn draw(&mut self, ui: &mut egui::Ui, alpha: f32) {
+        // Smoothstep so the fade eases in and out.
+        let t = self.fade * self.fade * (3.0 - 2.0 * self.fade);
+        if let Some(out) = self.outgoing {
+            let mut child = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(ui.max_rect())
+                    .id_salt(("out", out)),
+            );
+            self.pages[out].draw(&mut child, alpha * (1.0 - t));
+        }
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(ui.max_rect())
+                .id_salt(("in", self.current)),
+        );
+        self.pages[self.current].draw(&mut child, alpha * t);
     }
 
     /// Tick every page so background timers (Pomodoro, water) keep running.
