@@ -1,5 +1,6 @@
 //! Umbra: a Nusa-style dynamic island for the desktop.
 
+#[allow(dead_code)] // state/alpha consumed by widgets in later tasks
 mod island;
 mod pill;
 mod spring;

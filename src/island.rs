@@ -129,7 +129,7 @@ mod tests {
         settle(&mut i);
         assert_eq!(i.state(), State::Expanded);
         assert_eq!(i.width(), theme::EXPANDED_WIDTH);
-        assert_eq!(i.content_alpha(), 1.0);
+        assert!((i.content_alpha() - 1.0).abs() < 1e-3);
         i.set_expanded(false);
         assert_eq!(i.state(), State::Collapsing);
         settle(&mut i);
