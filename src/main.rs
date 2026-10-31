@@ -5,6 +5,8 @@ mod island;
 mod pill;
 mod spring;
 mod theme;
+#[allow(dead_code)] // wired up in task 9
+mod widget;
 
 use eframe::egui;
 
