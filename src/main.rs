@@ -1,5 +1,8 @@
 //! Umbra: a Nusa-style dynamic island for the desktop.
 
+mod pill;
+mod theme;
+
 use eframe::egui;
 
 /// Size of the overlay window: large enough for the fully expanded panel.
@@ -39,7 +42,12 @@ impl eframe::App for UmbraApp {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
-                ui.label("Umbra");
+                pill::paint(
+                    ui,
+                    theme::COLLAPSED_WIDTH,
+                    theme::COLLAPSED_HEIGHT,
+                    theme::COLLAPSED_HEIGHT / 2.0,
+                );
             });
     }
 }
