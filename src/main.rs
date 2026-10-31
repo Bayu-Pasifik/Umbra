@@ -9,34 +9,47 @@ mod theme;
 use eframe::egui;
 
 use island::Island;
-
-/// Size of the overlay window: large enough for the fully expanded panel.
-const WINDOW_SIZE: egui::Vec2 = egui::vec2(theme::EXPANDED_WIDTH, theme::EXPANDED_HEIGHT);
+/// Initial overlay window size: the collapsed pill.
+const WINDOW_SIZE: egui::Vec2 = egui::vec2(theme::COLLAPSED_WIDTH, theme::COLLAPSED_HEIGHT);
 
 struct UmbraApp {
-    positioned: bool,
     island: Island,
+    /// Last window size sent to the OS, to avoid redundant resize commands.
+    window_size: egui::Vec2,
+    /// Last window x position sent to the OS.
+    window_x: Option<f32>,
 }
 
 impl UmbraApp {
     fn new() -> Self {
         Self {
-            positioned: false,
             island: Island::new(),
+            window_size: WINDOW_SIZE,
+            window_x: None,
         }
     }
 
-    /// Pin the window to the top-center of the primary monitor.
-    /// The monitor size is only known once the first frame runs.
-    fn place_top_center(&mut self, ctx: &egui::Context) {
-        if self.positioned {
+    /// Make the window hug the pill, pinned to the top-center of the monitor.
+    ///
+    /// Clicks outside the pill pass through to the apps below because there is no
+    /// window there at all. This works the same on every OS.
+    fn fit_window_to_pill(&mut self, ctx: &egui::Context) {
+        let Some(monitor) = ctx.input(|i| i.viewport().monitor_size) else {
             return;
+        };
+        let ppp = ctx.pixels_per_point();
+        // Round up to whole physical pixels, plus 1px so edges are never clipped.
+        let fit = |v: f32| ((v * ppp).ceil() + 1.0) / ppp;
+        let size = egui::vec2(fit(self.island.width()), fit(self.island.height()));
+        let x = pill::snap((monitor.x - size.x) / 2.0, ppp);
+
+        if size != self.window_size {
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
+            self.window_size = size;
         }
-        let monitor = ctx.input(|i| i.viewport().monitor_size);
-        if let Some(monitor) = monitor {
-            let x = (monitor.x - WINDOW_SIZE.x) / 2.0;
+        if self.window_x != Some(x) {
             ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(x, 0.0)));
-            self.positioned = true;
+            self.window_x = Some(x);
         }
     }
 }
@@ -47,9 +60,9 @@ impl eframe::App for UmbraApp {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.place_top_center(ctx);
         let (dt, now) = ctx.input(|i| (i.stable_dt, i.time));
         self.island.update(dt);
+        self.fit_window_to_pill(ctx);
 
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
