@@ -161,6 +161,26 @@ impl AlertQueue {
     }
 }
 
+/// Draw the alert's icon centered on `c`.
+fn draw_icon(painter: &eframe::egui::Painter, kind: &AlertKind, c: eframe::egui::Pos2, alpha: f32) {
+    use crate::icons;
+    use crate::theme;
+    use crate::widgets::fade;
+
+    let white = fade(theme::TEXT_PRIMARY, alpha);
+    let accent = fade(theme::ACCENT, alpha);
+    match kind {
+        AlertKind::Charging { percent } => {
+            icons::battery(painter, c, 34.0, *percent as f32 / 100.0, white, accent)
+        }
+        AlertKind::Headphones { .. } => icons::headphones(painter, c, 34.0, accent),
+        AlertKind::Volume { level } => icons::volume(painter, c, 30.0, *level, white),
+        AlertKind::Brightness { .. } => icons::sun(painter, c, 30.0, white),
+        AlertKind::CapsLock { on } => {
+            icons::caps_lock(painter, c, 28.0, *on, if *on { accent } else { white })
+        }
+    }
+}
 /// Draw the alert panel: a title, a subtitle, and a level bar where it applies.
 pub fn draw(ui: &mut eframe::egui::Ui, kind: &AlertKind, alpha: f32) {
     use crate::theme;
@@ -171,6 +191,12 @@ pub fn draw(ui: &mut eframe::egui::Ui, kind: &AlertKind, alpha: f32) {
     let view = kind.view();
     let has_level = view.level.is_some();
     let y = rect.center().y - if has_level { 14.0 } else { 6.0 };
+    draw_icon(
+        ui.painter(),
+        kind,
+        pos2(rect.center().x - 110.0, rect.center().y),
+        alpha,
+    );
     text(
         ui,
         pos2(rect.center().x, y),

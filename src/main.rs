@@ -5,6 +5,7 @@ mod content;
 mod icons;
 #[allow(dead_code)] // state/alpha consumed by later tasks
 mod island;
+mod mascot;
 mod pill;
 mod spring;
 mod theme;
@@ -18,7 +19,8 @@ use eframe::egui;
 use alert::AlertQueue;
 use content::{DemoEvents, EventSource};
 use island::Island;
-use widget::PageStack;
+use mascot::Mascot;
+use widget::{PageStack, Widget as _};
 use widgets::{
     clock::Clock, music::Music, pomodoro::Pomodoro, todo::Todo, water::Water, SIZE_MEDIUM,
 };
@@ -38,6 +40,9 @@ struct UmbraApp {
     alerts: AlertQueue,
     events: Box<dyn EventSource>,
     clock: Clock,
+    mascot: Mascot,
+    /// Last time the user or an alert touched the island.
+    last_active: f64,
     /// Last window size sent to the OS, to avoid redundant resize commands.
     window_size: egui::Vec2,
     /// Last window x position sent to the OS.
@@ -61,6 +66,8 @@ impl UmbraApp {
             alerts: AlertQueue::new(),
             events: Box::new(DemoEvents::from_env()),
             clock: Clock::new(),
+            mascot: Mascot::new(),
+            last_active: 0.0,
             window_size: WINDOW_SIZE,
             window_x: None,
             scroll_accum: 0.0,
@@ -162,7 +169,10 @@ impl UmbraApp {
         self.island.set_hovered(hovered, now);
 
         // Collapsed face: the clock, fading out as the pill opens.
-        let face_alpha = (1.0 - self.island.progress() * 2.5).clamp(0.0, 1.0);
+        let collapsed_alpha = (1.0 - self.island.progress() * 2.5).clamp(0.0, 1.0);
+        let face_alpha = collapsed_alpha * (1.0 - self.mascot.alpha());
+        self.mascot
+            .draw(ui.painter(), rect.center(), collapsed_alpha, now);
         if face_alpha > 0.0 {
             ui.painter().text(
                 rect.center(),
@@ -211,6 +221,13 @@ impl eframe::App for UmbraApp {
         self.alerts.update(now);
         self.island.set_forced(self.alerts.is_active());
         self.island.update(dt);
+        let active =
+            self.island.wants_expanded() || self.island.is_animating() || self.alerts.is_active();
+        if active {
+            self.last_active = now;
+        }
+        let idle = !active && now - self.last_active >= mascot::IDLE_AFTER;
+        let mascot_busy = self.mascot.update(now, dt, idle);
         self.pages.tick_all(now);
         self.handle_navigation(ctx, now);
         let fading = self.pages.update(dt);
@@ -238,7 +255,20 @@ impl eframe::App for UmbraApp {
             }
         }
         // Repaint continuously only while a spring is moving.
-        if self.island.is_animating() || fading {
+        // Idle transition, mascot schedule, and the collapsed clock face.
+        if !active && !idle {
+            let left = mascot::IDLE_AFTER - (now - self.last_active);
+            ctx.request_repaint_after(Duration::from_secs_f64(left.max(0.0) + 0.01));
+        }
+        if let Some(wait) = self.mascot.next_wake(now) {
+            ctx.request_repaint_after(Duration::from_secs_f64(wait));
+        }
+        if !self.island.wants_expanded() {
+            if let Some(wait) = self.clock.next_wake(now) {
+                ctx.request_repaint_after(Duration::from_secs_f64(wait));
+            }
+        }
+        if self.island.is_animating() || fading || mascot_busy {
             ctx.request_repaint();
         }
     }
