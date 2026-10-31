@@ -48,7 +48,7 @@ impl eframe::App for UmbraApp {
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.place_top_center(ctx);
-        let dt = ctx.input(|i| i.stable_dt);
+        let (dt, now) = ctx.input(|i| (i.stable_dt, i.time));
         self.island.update(dt);
 
         egui::CentralPanel::default()
@@ -60,12 +60,16 @@ impl eframe::App for UmbraApp {
                     self.island.height(),
                     self.island.radius(),
                 );
-                // Temporary toggle until hover handling lands (task 6).
-                let response = ui.interact(rect, ui.id().with("pill"), egui::Sense::click());
-                if response.clicked() {
-                    self.island.set_expanded(!self.island.wants_expanded());
-                }
+                let hovered = ui
+                    .input(|i| i.pointer.hover_pos())
+                    .is_some_and(|p| rect.contains(p));
+                self.island.set_hovered(hovered, now);
             });
+
+        // Wake up again when the pending collapse is due.
+        if let Some(remaining) = self.island.leave_remaining(now) {
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(remaining + 0.01));
+        }
 
         // Repaint only while a spring is moving.
         if self.island.is_animating() {
