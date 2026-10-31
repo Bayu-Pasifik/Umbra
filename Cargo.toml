@@ -15,6 +15,7 @@ eframe = { version = "0.31", default-features = false, features = [
 ] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
+ureq = { version = "2", features = ["json"] }
 
 # Drag-out needs OS drag-and-drop APIs; Linux has no winit-compatible backend (GTK only).
 [target.'cfg(any(windows, target_os = "macos"))'.dependencies]
@@ -33,3 +34,8 @@ strip = true
 version = "24"
 default-features = false
 features = ["metal", "wgsl"]
+
+# Real system media session (Now Playing) on Windows.
+[target.'cfg(windows)'.dependencies.windows]
+version = "0.52"
+features = ["Media_Control", "Foundation"]

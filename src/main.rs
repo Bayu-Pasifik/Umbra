@@ -7,10 +7,13 @@ mod fullscreen;
 mod icons;
 #[allow(dead_code)] // state/alpha consumed by later tasks
 mod island;
+mod lyrics;
 mod mascot;
 mod pill;
 mod spring;
 mod store;
+#[cfg(windows)]
+mod sysmedia;
 mod theme;
 mod widget;
 mod widgets;
@@ -72,7 +75,7 @@ impl UmbraApp {
         let fullscreen = fullscreen::spawn(ctx.clone());
         let pages: Vec<Box<dyn widget::Widget>> = vec![
             Box::new(Clock::new()),
-            Box::new(Music::new(Box::new(content::MockMedia::new()))),
+            Box::new(music_page(ctx)),
             Box::new(Pomodoro::new()),
             Box::new(Water::new()),
             Box::new(Todo::new()),
@@ -373,6 +376,20 @@ impl eframe::App for UmbraApp {
 }
 
 /// GPU setup tuned for a tiny always-on overlay: the native low-power backend only,
+/// Music page backed by the real system media session where available.
+/// `UMBRA_MOCK_MEDIA=1` forces the built-in mock playlist instead.
+fn music_page(ctx: &egui::Context) -> Music {
+    #[cfg(windows)]
+    if std::env::var_os("UMBRA_MOCK_MEDIA").is_none() {
+        return Music::new(
+            Box::new(sysmedia::SystemMedia::spawn(ctx.clone())),
+            Some(lyrics::Lyrics::new(ctx.clone())),
+        );
+    }
+    let _ = ctx;
+    Music::new(Box::new(content::MockMedia::new()), None)
+}
+
 /// so we don't load several graphics drivers into memory.
 fn gpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
     use eframe::egui_wgpu::{WgpuConfiguration, WgpuSetup, WgpuSetupCreateNew};

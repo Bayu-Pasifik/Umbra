@@ -12,7 +12,8 @@ pub struct Track {
 
 /// Source of now-playing information and transport control.
 pub trait ContentSource {
-    fn track(&self) -> &Track;
+    /// The current track, or `None` when nothing is playing.
+    fn track(&self) -> Option<Track>;
     /// Playback position in seconds at time `now`.
     fn position(&self, now: f64) -> f64;
     fn is_playing(&self) -> bool;
@@ -52,8 +53,8 @@ impl MockMedia {
 }
 
 impl ContentSource for MockMedia {
-    fn track(&self) -> &Track {
-        &self.tracks[self.index]
+    fn track(&self) -> Option<Track> {
+        Some(self.tracks[self.index].clone())
     }
 
     fn position(&self, now: f64) -> f64 {
@@ -62,7 +63,7 @@ impl ContentSource for MockMedia {
         } else {
             self.base
         };
-        pos.clamp(0.0, self.track().duration)
+        pos.clamp(0.0, self.tracks[self.index].duration)
     }
 
     fn is_playing(&self) -> bool {
@@ -156,9 +157,9 @@ mod tests {
     fn skip_wraps_and_resets_position() {
         let mut m = MockMedia::new();
         m.skip(false, 0.0);
-        assert_eq!(m.track().title, "Resonance");
+        assert_eq!(m.track().unwrap().title, "Resonance");
         m.skip(true, 0.0);
-        assert_eq!(m.track().title, "Midnight City");
+        assert_eq!(m.track().unwrap().title, "Midnight City");
         assert_eq!(m.position(5.0), 0.0);
     }
 }
