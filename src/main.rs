@@ -1,5 +1,6 @@
 //! Umbra: a Nusa-style dynamic island for the desktop.
 
+mod alert;
 mod content;
 mod icons;
 #[allow(dead_code)] // state/alpha consumed by later tasks
@@ -14,6 +15,8 @@ use std::time::Duration;
 
 use eframe::egui;
 
+use alert::AlertQueue;
+use content::{DemoEvents, EventSource};
 use island::Island;
 use widget::PageStack;
 use widgets::{
@@ -32,6 +35,8 @@ const SCROLL_THRESHOLD: f32 = 20.0;
 struct UmbraApp {
     island: Island,
     pages: PageStack,
+    alerts: AlertQueue,
+    events: Box<dyn EventSource>,
     clock: Clock,
     /// Last window size sent to the OS, to avoid redundant resize commands.
     window_size: egui::Vec2,
@@ -53,6 +58,8 @@ impl UmbraApp {
         Self {
             island: Island::new(),
             pages: PageStack::new(pages),
+            alerts: AlertQueue::new(),
+            events: Box::new(DemoEvents::from_env()),
             clock: Clock::new(),
             window_size: WINDOW_SIZE,
             window_x: None,
@@ -181,7 +188,11 @@ impl UmbraApp {
             );
             let mut child = ui.new_child(egui::UiBuilder::new().max_rect(content));
             child.set_clip_rect(rect.intersect(ui.clip_rect()));
-            self.pages.draw(&mut child, alpha);
+            if let Some(kind) = self.alerts.current() {
+                alert::draw(&mut child, kind, alpha);
+            } else {
+                self.pages.draw(&mut child, alpha);
+            }
             self.draw_dots(ui, rect, alpha);
         }
     }
@@ -194,6 +205,11 @@ impl eframe::App for UmbraApp {
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let (dt, now) = ctx.input(|i| (i.stable_dt, i.time));
+        for event in self.events.poll(now) {
+            self.alerts.push(event, now);
+        }
+        self.alerts.update(now);
+        self.island.set_forced(self.alerts.is_active());
         self.island.update(dt);
         self.pages.tick_all(now);
         self.handle_navigation(ctx, now);
@@ -207,6 +223,13 @@ impl eframe::App for UmbraApp {
         // Wake up again when the pending collapse is due.
         if let Some(remaining) = self.island.leave_remaining(now) {
             ctx.request_repaint_after(Duration::from_secs_f64(remaining + 0.01));
+        }
+        // Wake when the alert expires or the next system event is due.
+        if let Some(left) = self.alerts.time_left(now) {
+            ctx.request_repaint_after(Duration::from_secs_f64(left + 0.01));
+        }
+        if let Some(wait) = self.events.next_wake(now) {
+            ctx.request_repaint_after(Duration::from_secs_f64(wait));
         }
         // Wake for page timers, only while their page is visible.
         if self.island.wants_expanded() {

@@ -20,6 +20,10 @@ pub struct Island {
     height: Spring,
     radius: Spring,
     want_expanded: bool,
+    /// Pointer is (or recently was) over the pill.
+    hover_open: bool,
+    /// An alert is holding the island open.
+    forced: bool,
     /// Time (seconds) at which the pointer left while expanded.
     leave_since: Option<f64>,
 }
@@ -31,6 +35,8 @@ impl Island {
             height: Spring::new(theme::COLLAPSED_HEIGHT),
             radius: Spring::new(theme::COLLAPSED_HEIGHT / 2.0),
             want_expanded: false,
+            hover_open: false,
+            forced: false,
             leave_since: None,
         }
     }
@@ -60,15 +66,28 @@ impl Island {
     pub fn set_hovered(&mut self, hovered: bool, now: f64) {
         if hovered {
             self.leave_since = None;
-            if !self.want_expanded {
-                self.set_expanded(true);
-            }
-        } else if self.want_expanded {
+            self.hover_open = true;
+        } else if self.hover_open {
             let since = *self.leave_since.get_or_insert(now);
             if now - since >= LEAVE_DELAY {
                 self.leave_since = None;
-                self.set_expanded(false);
+                self.hover_open = false;
             }
+        }
+        self.apply();
+    }
+
+    /// Keep the island open regardless of hover (used while an alert is showing).
+    pub fn set_forced(&mut self, forced: bool) {
+        self.forced = forced;
+        self.apply();
+    }
+
+    /// Open if hover or an alert wants it open; close otherwise.
+    fn apply(&mut self) {
+        let open = self.hover_open || self.forced;
+        if open != self.want_expanded {
+            self.set_expanded(open);
         }
     }
 

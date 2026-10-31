@@ -1,6 +1,8 @@
 //! OS integration boundary. v1 ships mocks only (PRD assumption): real media session,
 //! battery and Bluetooth backends can implement these traits later.
 
+use crate::alert::AlertKind;
+
 #[derive(Debug, Clone)]
 pub struct Track {
     pub title: String,
@@ -82,6 +84,57 @@ impl ContentSource for MockMedia {
         };
         self.base = 0.0;
         self.anchor = now;
+    }
+}
+
+/// Source of system events that become transient alerts.
+pub trait EventSource {
+    /// Events that happened since the last poll.
+    fn poll(&mut self, now: f64) -> Vec<AlertKind>;
+    /// Seconds until the next possible event, so the app can sleep until then.
+    fn next_wake(&self, now: f64) -> Option<f64>;
+}
+
+/// Mock event source: cycles through sample alerts on a fixed interval.
+/// Enabled with the `UMBRA_DEMO_ALERTS` environment variable; silent otherwise.
+pub struct DemoEvents {
+    enabled: bool,
+    next_at: f64,
+    step: usize,
+}
+
+const DEMO_INTERVAL: f64 = 8.0;
+
+impl DemoEvents {
+    pub fn from_env() -> Self {
+        Self {
+            enabled: std::env::var_os("UMBRA_DEMO_ALERTS").is_some(),
+            next_at: 3.0,
+            step: 0,
+        }
+    }
+}
+
+impl EventSource for DemoEvents {
+    fn poll(&mut self, now: f64) -> Vec<AlertKind> {
+        if !self.enabled || now < self.next_at {
+            return Vec::new();
+        }
+        let kinds = [
+            AlertKind::Charging { percent: 80 },
+            AlertKind::Headphones { connected: true },
+            AlertKind::Volume { level: 0.6 },
+            AlertKind::Brightness { level: 0.4 },
+            AlertKind::CapsLock { on: true },
+        ];
+        let kind = kinds[self.step % kinds.len()].clone();
+        self.step += 1;
+        self.next_at = now + DEMO_INTERVAL;
+        vec![kind]
+    }
+
+    fn next_wake(&self, now: f64) -> Option<f64> {
+        self.enabled.then(|| (self.next_at - now).max(0.0) + 0.01)
     }
 }
 
