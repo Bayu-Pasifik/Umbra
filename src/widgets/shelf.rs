@@ -66,6 +66,33 @@ impl Widget for Shelf {
         egui::vec2(theme::EXPANDED_WIDTH, theme::EXPANDED_HEIGHT)
     }
 
+    fn state_key(&self) -> Option<&'static str> {
+        Some("shelf")
+    }
+
+    fn save_state(&self) -> serde_json::Value {
+        serde_json::Value::Array(
+            self.files
+                .iter()
+                .map(|p| serde_json::Value::String(p.to_string_lossy().into_owned()))
+                .collect(),
+        )
+    }
+
+    fn load_state(&mut self, value: &serde_json::Value) {
+        self.files = value
+            .as_array()
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|v| v.as_str())
+                    .map(PathBuf::from)
+                    .filter(|p| p.exists())
+                    .collect()
+            })
+            .unwrap_or_default();
+    }
+
     fn accept_files(&mut self, paths: &[PathBuf]) -> bool {
         self.add_all(paths);
         true

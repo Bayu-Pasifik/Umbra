@@ -65,6 +65,36 @@ impl Widget for Todo {
         egui::vec2(theme::EXPANDED_WIDTH, theme::EXPANDED_HEIGHT)
     }
 
+    fn state_key(&self) -> Option<&'static str> {
+        Some("todo")
+    }
+
+    fn save_state(&self) -> serde_json::Value {
+        serde_json::Value::Array(
+            self.items
+                .iter()
+                .map(|i| serde_json::json!({"title": i.title, "done": i.done}))
+                .collect(),
+        )
+    }
+
+    fn load_state(&mut self, value: &serde_json::Value) {
+        self.items = value
+            .as_array()
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|v| {
+                        Some(Item {
+                            title: v.get("title")?.as_str()?.to_string(),
+                            done: v.get("done").and_then(|d| d.as_bool()).unwrap_or(false),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+    }
+
     fn draw(&mut self, ui: &mut egui::Ui, alpha: f32) {
         let rect = ui.max_rect();
         let white = fade(theme::TEXT_PRIMARY, alpha);
@@ -187,5 +217,25 @@ mod tests {
         assert_eq!(t.pending(), 0);
         t.remove(0);
         assert!(t.items.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod persistence_tests {
+    use super::*;
+
+    #[test]
+    fn state_round_trips_and_tolerates_junk() {
+        let mut t = Todo::new();
+        t.add("one");
+        t.add("two");
+        t.toggle(1);
+        let saved = t.save_state();
+        let mut restored = Todo::new();
+        restored.load_state(&saved);
+        assert_eq!(restored.items.len(), 2);
+        assert!(restored.items[1].done);
+        restored.load_state(&serde_json::json!("garbage"));
+        assert!(restored.items.is_empty());
     }
 }

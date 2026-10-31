@@ -39,6 +39,19 @@ pub trait Widget {
         None
     }
 
+    /// Key under which this page's state is saved, or `None` if it keeps no state.
+    fn state_key(&self) -> Option<&'static str> {
+        None
+    }
+
+    /// Serialize this page's persistent state.
+    fn save_state(&self) -> serde_json::Value {
+        serde_json::Value::Null
+    }
+
+    /// Restore state saved by `save_state`. Must tolerate malformed data.
+    fn load_state(&mut self, _value: &serde_json::Value) {}
+
     /// Advance timers. `now` is the egui clock in seconds.
     fn tick(&mut self, _now: f64) {}
 
@@ -155,6 +168,23 @@ impl PageStack {
     /// Take a pending request from the visible page.
     pub fn take_request(&mut self) -> Option<Request> {
         self.pages[self.current].take_request()
+    }
+
+    /// Collect every page's persistent state, keyed by `state_key`.
+    pub fn snapshot(&self) -> serde_json::Map<String, serde_json::Value> {
+        self.pages
+            .iter()
+            .filter_map(|p| p.state_key().map(|k| (k.to_string(), p.save_state())))
+            .collect()
+    }
+
+    /// Hand each page its saved state, if any.
+    pub fn restore(&mut self, state: &serde_json::Map<String, serde_json::Value>) {
+        for page in &mut self.pages {
+            if let Some(value) = page.state_key().and_then(|k| state.get(k)) {
+                page.load_state(value);
+            }
+        }
     }
 
     /// Tick every page so background timers (Pomodoro, water) keep running.

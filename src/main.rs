@@ -9,6 +9,7 @@ mod island;
 mod mascot;
 mod pill;
 mod spring;
+mod store;
 mod theme;
 mod widget;
 mod widgets;
@@ -47,6 +48,9 @@ struct UmbraApp {
     last_active: f64,
     /// Files are being dragged over the window.
     file_hover: bool,
+    store_path: Option<std::path::PathBuf>,
+    /// Serialized state last written, to skip redundant saves.
+    last_saved: String,
     /// Last window size sent to the OS, to avoid redundant resize commands.
     window_size: egui::Vec2,
     /// Last window x position sent to the OS.
@@ -65,15 +69,23 @@ impl UmbraApp {
             Box::new(Todo::new()),
             Box::new(Shelf::new()),
         ];
+        let mut pages = PageStack::new(pages);
+        let store_path = store::default_path();
+        if let Some(path) = &store_path {
+            pages.restore(&store::load_from(path));
+        }
+        let last_saved = serde_json::Value::Object(pages.snapshot()).to_string();
         Self {
             island: Island::new(),
-            pages: PageStack::new(pages),
+            pages,
             alerts: AlertQueue::new(),
             events: Box::new(DemoEvents::from_env()),
             clock: Clock::new(),
             mascot: Mascot::new(),
             last_active: 0.0,
             file_hover: false,
+            store_path,
+            last_saved,
             window_size: WINDOW_SIZE,
             window_x: None,
             scroll_accum: 0.0,
@@ -102,6 +114,22 @@ impl UmbraApp {
         if self.window_x != Some(x) {
             ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(x, 0.0)));
             self.window_x = Some(x);
+        }
+    }
+
+    /// Write page state to disk if it changed since the last save.
+    fn persist(&mut self) {
+        let Some(path) = &self.store_path else {
+            return;
+        };
+        let snapshot = self.pages.snapshot();
+        let serialized = serde_json::Value::Object(snapshot.clone()).to_string();
+        if serialized == self.last_saved {
+            return;
+        }
+        match store::save_to(path, &snapshot) {
+            Ok(()) => self.last_saved = serialized,
+            Err(err) => eprintln!("umbra: could not save state: {err}"),
         }
     }
 
@@ -215,6 +243,10 @@ impl UmbraApp {
 }
 
 impl eframe::App for UmbraApp {
+    fn on_exit(&mut self) {
+        self.persist();
+    }
+
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
         egui::Rgba::TRANSPARENT.to_array()
     }
@@ -260,6 +292,10 @@ impl eframe::App for UmbraApp {
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| self.draw_island(ui, now));
 
+        // State only changes through user interaction, which needs the island open.
+        if self.island.wants_expanded() {
+            self.persist();
+        }
         if let Some(Request::DragOut(files)) = self.pages.take_request() {
             dragout::start(frame, files);
         }

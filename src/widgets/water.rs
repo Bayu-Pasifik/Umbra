@@ -50,6 +50,28 @@ impl Widget for Water {
         egui::vec2(theme::EXPANDED_WIDTH, theme::EXPANDED_HEIGHT)
     }
 
+    fn state_key(&self) -> Option<&'static str> {
+        Some("water")
+    }
+
+    fn save_state(&self) -> serde_json::Value {
+        serde_json::json!({"ml": self.drunk_ml, "day": self.day.to_string()})
+    }
+
+    fn load_state(&mut self, value: &serde_json::Value) {
+        let day = value
+            .get("day")
+            .and_then(|d| d.as_str())
+            .and_then(|d| d.parse::<NaiveDate>().ok());
+        let ml = value.get("ml").and_then(|m| m.as_u64());
+        if let (Some(day), Some(ml)) = (day, ml) {
+            self.day = day;
+            self.drunk_ml = ml.min(u64::from(GOAL_ML * 2)) as u32;
+            // A saved day that is no longer today resets the counter.
+            self.roll_day(Local::now().date_naive());
+        }
+    }
+
     fn tick(&mut self, _now: f64) {
         self.roll_day(Local::now().date_naive());
     }
