@@ -224,3 +224,36 @@ mod hover_tests {
         assert!(!i.wants_expanded());
     }
 }
+
+#[cfg(test)]
+mod alert_overlap_tests {
+    use super::*;
+
+    #[test]
+    fn alert_keeps_island_open_after_pointer_leaves() {
+        let mut i = Island::new();
+        i.set_hovered(true, 0.0);
+        i.set_forced(true);
+        i.set_hovered(false, 1.0);
+        i.set_hovered(false, 2.0);
+        assert!(i.wants_expanded(), "alert must hold the island open");
+        i.set_forced(false);
+        assert!(
+            !i.wants_expanded(),
+            "closes once alert ends and pointer is gone"
+        );
+    }
+
+    #[test]
+    fn rapid_hover_toggling_never_collapses_early() {
+        let mut i = Island::new();
+        let mut t = 0.0;
+        for _ in 0..50 {
+            i.set_hovered(true, t);
+            t += 0.05;
+            i.set_hovered(false, t);
+            t += 0.05;
+        }
+        assert!(i.wants_expanded());
+    }
+}

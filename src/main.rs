@@ -3,6 +3,7 @@
 mod alert;
 mod content;
 mod dragout;
+mod fullscreen;
 mod icons;
 #[allow(dead_code)] // state/alpha consumed by later tasks
 mod island;
@@ -37,6 +38,9 @@ const CONTENT_PADDING: egui::Vec2 = egui::vec2(24.0, 12.0);
 /// Wheel movement (points) needed to switch one page.
 const SCROLL_THRESHOLD: f32 = 20.0;
 
+/// Y position (points) where the window is parked while another app is fullscreen.
+const PARKED_Y: f32 = -10_000.0;
+
 struct UmbraApp {
     island: Island,
     pages: PageStack,
@@ -54,13 +58,18 @@ struct UmbraApp {
     /// Last window size sent to the OS, to avoid redundant resize commands.
     window_size: egui::Vec2,
     /// Last window x position sent to the OS.
-    window_x: Option<f32>,
+    window_pos: Option<egui::Pos2>,
+    last_ppp: f32,
+    /// Another app is fullscreen: the island is parked off-screen.
+    hidden: bool,
+    fullscreen: std::sync::Arc<std::sync::atomic::AtomicBool>,
     scroll_accum: f32,
     last_scroll_nav: f64,
 }
 
 impl UmbraApp {
-    fn new() -> Self {
+    fn new(ctx: &egui::Context) -> Self {
+        let fullscreen = fullscreen::spawn(ctx.clone());
         let pages: Vec<Box<dyn widget::Widget>> = vec![
             Box::new(Clock::new()),
             Box::new(Music::new(Box::new(content::MockMedia::new()))),
@@ -87,7 +96,10 @@ impl UmbraApp {
             store_path,
             last_saved,
             window_size: WINDOW_SIZE,
-            window_x: None,
+            window_pos: None,
+            last_ppp: 0.0,
+            hidden: false,
+            fullscreen,
             scroll_accum: 0.0,
             last_scroll_nav: f64::NEG_INFINITY,
         }
@@ -102,18 +114,29 @@ impl UmbraApp {
             return;
         };
         let ppp = ctx.pixels_per_point();
+        // A DPI change (moving monitors, OS scale change) invalidates the pixel rounding,
+        // so resend size and position.
+        if (ppp - self.last_ppp).abs() > f32::EPSILON {
+            self.last_ppp = ppp;
+            self.window_size = egui::Vec2::ZERO;
+            self.window_pos = None;
+        }
         // Round up to whole physical pixels, plus 1px so edges are never clipped.
         let fit = |v: f32| ((v * ppp).ceil() + 1.0) / ppp;
         let size = egui::vec2(fit(self.island.width()), fit(self.island.height()));
         let x = pill::snap((monitor.x - size.x) / 2.0, ppp);
+        // While another app is fullscreen, park the window far off-screen instead of
+        // hiding or minimizing it, so that app never loses focus or exclusive fullscreen.
+        let y = if self.hidden { PARKED_Y } else { 0.0 };
+        let pos = egui::pos2(x, y);
 
         if size != self.window_size {
             ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
             self.window_size = size;
         }
-        if self.window_x != Some(x) {
-            ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(x, 0.0)));
-            self.window_x = Some(x);
+        if self.window_pos != Some(pos) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos));
+            self.window_pos = Some(pos);
         }
     }
 
@@ -286,6 +309,7 @@ impl eframe::App for UmbraApp {
         }
         self.alerts.update(now);
         self.island.set_forced(self.alerts.is_active());
+        self.hidden = self.fullscreen.load(std::sync::atomic::Ordering::Relaxed);
         self.island.update(dt);
         let active =
             self.island.wants_expanded() || self.island.is_animating() || self.alerts.is_active();
@@ -386,6 +410,6 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "Umbra",
         options,
-        Box::new(|_cc| Ok(Box::new(UmbraApp::new()))),
+        Box::new(|cc| Ok(Box::new(UmbraApp::new(&cc.egui_ctx)))),
     )
 }
