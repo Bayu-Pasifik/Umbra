@@ -9,8 +9,8 @@ const STEP: f32 = 1.0 / 120.0;
 /// Upper bound on time consumed per update, so a long stall cannot spiral.
 const MAX_FRAME: f32 = 0.1;
 
-const REST_DISTANCE: f32 = 0.01;
-const REST_VELOCITY: f32 = 0.01;
+const REST_DISTANCE: f32 = 0.05;
+const REST_VELOCITY: f32 = 0.1;
 
 #[derive(Debug, Clone)]
 pub struct Spring {

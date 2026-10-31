@@ -253,6 +253,17 @@ impl eframe::App for UmbraApp {
 
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         let (dt, now) = ctx.input(|i| (i.stable_dt, i.time));
+        if std::env::var_os("UMBRA_DEBUG_FRAMES").is_some() {
+            eprintln!(
+                "frame {} t={now:.2} anim={} exp={} alpha={} next={:?} clockw={:?}",
+                ctx.cumulative_pass_nr(),
+                self.island.is_animating(),
+                self.island.wants_expanded(),
+                self.mascot.alpha(),
+                self.mascot.next_wake(now),
+                self.clock.next_wake(now)
+            );
+        }
         // Files dragged over the island open the shelf; dropped files land on it.
         let (dropped, hovering) = ctx.input(|i| {
             let dropped: Vec<std::path::PathBuf> = i
@@ -337,9 +348,31 @@ impl eframe::App for UmbraApp {
     }
 }
 
+/// GPU setup tuned for a tiny always-on overlay: the native low-power backend only,
+/// so we don't load several graphics drivers into memory.
+fn gpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
+    use eframe::egui_wgpu::{WgpuConfiguration, WgpuSetup, WgpuSetupCreateNew};
+    use eframe::wgpu;
+
+    let backends = if cfg!(target_os = "macos") {
+        wgpu::Backends::METAL
+    } else {
+        wgpu::Backends::VULKAN
+    };
+    let mut setup = WgpuSetupCreateNew::default();
+    setup.instance_descriptor.backends = backends;
+    setup.power_preference = wgpu::PowerPreference::LowPower;
+    WgpuConfiguration {
+        wgpu_setup: WgpuSetup::CreateNew(setup),
+        desired_maximum_frame_latency: Some(1),
+        ..Default::default()
+    }
+}
+
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
+        wgpu_options: gpu_options(),
         viewport: egui::ViewportBuilder::default()
             .with_inner_size(WINDOW_SIZE)
             .with_decorations(false)

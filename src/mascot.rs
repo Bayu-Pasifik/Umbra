@@ -4,7 +4,6 @@
 use eframe::egui::{Painter, Pos2};
 
 use crate::icons;
-use crate::spring::Spring;
 use crate::theme;
 
 /// Seconds without activity before the clock gives way to the eyes.
@@ -12,14 +11,16 @@ pub const IDLE_AFTER: f64 = 10.0;
 /// Fade duration between clock and eyes.
 const FADE_SECONDS: f32 = 0.4;
 const BLINK_SECONDS: f64 = 0.18;
-const BLINK_EVERY: f64 = 4.0;
-const LOOK_EVERY: f64 = 2.5;
+const BLINK_EVERY: f64 = 5.0;
+const LOOK_EVERY: f64 = 6.0;
 
 pub struct Mascot {
     /// 0.0 hidden, 1.0 fully visible.
     alpha: f32,
-    look_x: Spring,
-    look_y: Spring,
+    look_x: f32,
+    look_target_x: f32,
+    look_y: f32,
+    look_target_y: f32,
     next_look: f64,
     blink_start: Option<f64>,
     next_blink: f64,
@@ -30,8 +31,10 @@ impl Mascot {
     pub fn new() -> Self {
         Self {
             alpha: 0.0,
-            look_x: Spring::new(0.0),
-            look_y: Spring::new(0.0),
+            look_x: 0.0,
+            look_target_x: 0.0,
+            look_y: 0.0,
+            look_target_y: 0.0,
             next_look: LOOK_EVERY,
             blink_start: None,
             next_blink: BLINK_EVERY,
@@ -72,9 +75,9 @@ impl Mascot {
 
         if now >= self.next_look {
             let (x, y) = (self.rand(), self.rand());
-            self.look_x.set_target(x * 4.0);
-            self.look_y.set_target(y * 1.5);
-            self.next_look = now + LOOK_EVERY + f64::from(self.rand().abs()) * 1.5;
+            self.look_target_x = x * 4.0;
+            self.look_target_y = y * 1.5;
+            self.next_look = now + LOOK_EVERY + f64::from(self.rand().abs()) * 3.0;
         }
         if self.blink_start.is_none() && now >= self.next_blink {
             self.blink_start = Some(now);
@@ -85,13 +88,18 @@ impl Mascot {
                 self.next_blink = now + BLINK_EVERY + f64::from(self.rand().abs()) * 2.0;
             }
         }
-        self.look_x.update(dt);
-        self.look_y.update(dt);
+        // Quick exponential glide: settles in about a quarter of a second.
+        let glide = 1.0 - (-14.0 * dt).exp();
+        self.look_x += (self.look_target_x - self.look_x) * glide;
+        self.look_y += (self.look_target_y - self.look_y) * glide;
+        let moving = (self.look_target_x - self.look_x).abs() > 0.05
+            || (self.look_target_y - self.look_y).abs() > 0.05;
+        if !moving {
+            self.look_x = self.look_target_x;
+            self.look_y = self.look_target_y;
+        }
 
-        fading
-            || self.blink_start.is_some()
-            || !self.look_x.is_at_rest()
-            || !self.look_y.is_at_rest()
+        fading || self.blink_start.is_some() || moving
     }
 
     /// Seconds until the mascot next needs a frame while it sits still.
@@ -123,8 +131,8 @@ impl Mascot {
         icons::eyes(
             painter,
             center,
-            self.look_x.value,
-            self.look_y.value,
+            self.look_x,
+            self.look_y,
             self.openness(now),
             color,
         );

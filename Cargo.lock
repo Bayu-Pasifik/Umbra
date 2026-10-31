@@ -3121,6 +3121,7 @@ dependencies = [
  "eframe",
  "serde",
  "serde_json",
+ "wgpu",
 ]
 
 [[package]]

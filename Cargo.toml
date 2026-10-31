@@ -26,3 +26,10 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# Metal on macOS; Vulkan (always built) on Windows and Linux. DX12 was tried on Windows but
+# kept the event loop spinning with a transparent surface.
+[target.'cfg(target_os = "macos")'.dependencies.wgpu]
+version = "24"
+default-features = false
+features = ["metal", "wgsl"]
