@@ -1,22 +1,28 @@
 //! Umbra: a Nusa-style dynamic island for the desktop.
 
+mod island;
 mod pill;
-#[allow(dead_code)] // wired up in task 5
 mod spring;
 mod theme;
 
 use eframe::egui;
 
+use island::Island;
+
 /// Size of the overlay window: large enough for the fully expanded panel.
-const WINDOW_SIZE: egui::Vec2 = egui::vec2(420.0, 180.0);
+const WINDOW_SIZE: egui::Vec2 = egui::vec2(theme::EXPANDED_WIDTH, theme::EXPANDED_HEIGHT);
 
 struct UmbraApp {
     positioned: bool,
+    island: Island,
 }
 
 impl UmbraApp {
     fn new() -> Self {
-        Self { positioned: false }
+        Self {
+            positioned: false,
+            island: Island::new(),
+        }
     }
 
     /// Pin the window to the top-center of the primary monitor.
@@ -41,16 +47,29 @@ impl eframe::App for UmbraApp {
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.place_top_center(ctx);
+        let dt = ctx.input(|i| i.stable_dt);
+        self.island.update(dt);
+
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
-                pill::paint(
+                let rect = pill::paint(
                     ui,
-                    theme::COLLAPSED_WIDTH,
-                    theme::COLLAPSED_HEIGHT,
-                    theme::COLLAPSED_HEIGHT / 2.0,
+                    self.island.width(),
+                    self.island.height(),
+                    self.island.radius(),
                 );
+                // Temporary toggle until hover handling lands (task 6).
+                let response = ui.interact(rect, ui.id().with("pill"), egui::Sense::click());
+                if response.clicked() {
+                    self.island.set_expanded(!self.island.wants_expanded());
+                }
             });
+
+        // Repaint only while a spring is moving.
+        if self.island.is_animating() {
+            ctx.request_repaint();
+        }
     }
 }
 
