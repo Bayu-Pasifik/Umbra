@@ -34,10 +34,12 @@ impl Pomodoro {
         }
     }
 
+    #[cfg(test)]
     pub fn phase(&self) -> Phase {
         self.phase
     }
 
+    #[cfg(test)]
     pub fn remaining(&self) -> f64 {
         self.remaining
     }

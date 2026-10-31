@@ -1,5 +1,7 @@
 //! `Widget` trait and the page stack that holds the content pages.
 
+#![allow(dead_code)] // page API is consumed incrementally (navigation in task 10)
+
 use eframe::egui::{self, Vec2};
 
 /// One content page shown inside the expanded island.

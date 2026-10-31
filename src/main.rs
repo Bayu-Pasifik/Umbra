@@ -1,21 +1,35 @@
 //! Umbra: a Nusa-style dynamic island for the desktop.
 
-#[allow(dead_code)] // state/alpha consumed by widgets in later tasks
+mod content;
+mod icons;
+#[allow(dead_code)] // state/alpha consumed by later tasks
 mod island;
 mod pill;
 mod spring;
 mod theme;
-#[allow(dead_code)] // wired up in task 9
 mod widget;
+mod widgets;
+
+use std::time::Duration;
 
 use eframe::egui;
 
 use island::Island;
+use widget::PageStack;
+use widgets::{
+    clock::Clock, music::Music, pomodoro::Pomodoro, todo::Todo, water::Water, SIZE_MEDIUM,
+};
+
 /// Initial overlay window size: the collapsed pill.
 const WINDOW_SIZE: egui::Vec2 = egui::vec2(theme::COLLAPSED_WIDTH, theme::COLLAPSED_HEIGHT);
 
+/// Padding between the pill edge and page content.
+const CONTENT_PADDING: egui::Vec2 = egui::vec2(24.0, 12.0);
+
 struct UmbraApp {
     island: Island,
+    pages: PageStack,
+    clock: Clock,
     /// Last window size sent to the OS, to avoid redundant resize commands.
     window_size: egui::Vec2,
     /// Last window x position sent to the OS.
@@ -24,8 +38,17 @@ struct UmbraApp {
 
 impl UmbraApp {
     fn new() -> Self {
+        let pages: Vec<Box<dyn widget::Widget>> = vec![
+            Box::new(Clock::new()),
+            Box::new(Music::new(Box::new(content::MockMedia::new()))),
+            Box::new(Pomodoro::new()),
+            Box::new(Water::new()),
+            Box::new(Todo::new()),
+        ];
         Self {
             island: Island::new(),
+            pages: PageStack::new(pages),
+            clock: Clock::new(),
             window_size: WINDOW_SIZE,
             window_x: None,
         }
@@ -54,6 +77,49 @@ impl UmbraApp {
             self.window_x = Some(x);
         }
     }
+
+    fn draw_island(&mut self, ui: &mut egui::Ui, now: f64) {
+        let rect = pill::paint(
+            ui,
+            self.island.width(),
+            self.island.height(),
+            self.island.radius(),
+        );
+        let hovered = ui
+            .input(|i| i.pointer.hover_pos())
+            .is_some_and(|p| rect.contains(p));
+        self.island.set_hovered(hovered, now);
+
+        // Collapsed face: the clock, fading out as the pill opens.
+        let face_alpha = (1.0 - self.island.progress() * 2.5).clamp(0.0, 1.0);
+        if face_alpha > 0.0 {
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                self.clock.time_string(),
+                widgets::mono(SIZE_MEDIUM),
+                widgets::fade(theme::TEXT_PRIMARY, face_alpha),
+            );
+        }
+
+        // Expanded content, laid out at full size and clipped to the pill.
+        let alpha = self.island.content_alpha();
+        if alpha > 0.0 {
+            let content = egui::Rect::from_min_size(
+                egui::pos2(
+                    rect.center().x - theme::EXPANDED_WIDTH / 2.0 + CONTENT_PADDING.x,
+                    rect.top() + CONTENT_PADDING.y,
+                ),
+                egui::vec2(
+                    theme::EXPANDED_WIDTH - 2.0 * CONTENT_PADDING.x,
+                    theme::EXPANDED_HEIGHT - 2.0 * CONTENT_PADDING.y,
+                ),
+            );
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(content));
+            child.set_clip_rect(rect.intersect(ui.clip_rect()));
+            self.pages.current_mut().draw(&mut child, alpha);
+        }
+    }
 }
 
 impl eframe::App for UmbraApp {
@@ -64,29 +130,24 @@ impl eframe::App for UmbraApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let (dt, now) = ctx.input(|i| (i.stable_dt, i.time));
         self.island.update(dt);
+        self.pages.tick_all(now);
         self.fit_window_to_pill(ctx);
 
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
-            .show(ctx, |ui| {
-                let rect = pill::paint(
-                    ui,
-                    self.island.width(),
-                    self.island.height(),
-                    self.island.radius(),
-                );
-                let hovered = ui
-                    .input(|i| i.pointer.hover_pos())
-                    .is_some_and(|p| rect.contains(p));
-                self.island.set_hovered(hovered, now);
-            });
+            .show(ctx, |ui| self.draw_island(ui, now));
 
         // Wake up again when the pending collapse is due.
         if let Some(remaining) = self.island.leave_remaining(now) {
-            ctx.request_repaint_after(std::time::Duration::from_secs_f64(remaining + 0.01));
+            ctx.request_repaint_after(Duration::from_secs_f64(remaining + 0.01));
         }
-
-        // Repaint only while a spring is moving.
+        // Wake for page timers, only while their page is visible.
+        if self.island.wants_expanded() {
+            if let Some(wait) = self.pages.current_wake(now) {
+                ctx.request_repaint_after(Duration::from_secs_f64(wait));
+            }
+        }
+        // Repaint continuously only while a spring is moving.
         if self.island.is_animating() {
             ctx.request_repaint();
         }

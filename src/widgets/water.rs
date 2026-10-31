@@ -58,7 +58,12 @@ impl Widget for Water {
         let rect = ui.max_rect();
         let accent = fade(theme::ACCENT, alpha);
 
-        icons::drop(ui.painter(), pos2(rect.left() + 12.0, rect.top() + 16.0), 22.0, accent);
+        icons::drop(
+            ui.painter(),
+            pos2(rect.left() + 12.0, rect.top() + 16.0),
+            22.0,
+            accent,
+        );
         text(
             ui,
             pos2(rect.left() + 32.0, rect.top() + 16.0),
@@ -71,7 +76,11 @@ impl Widget for Water {
             ui,
             rect.center() - egui::vec2(0.0, 2.0),
             Align2::CENTER_CENTER,
-            &format!("{:.2} / {:.1} L", self.drunk_ml as f32 / 1000.0, GOAL_ML as f32 / 1000.0),
+            &format!(
+                "{:.2} / {:.1} L",
+                self.drunk_ml as f32 / 1000.0,
+                GOAL_ML as f32 / 1000.0
+            ),
             super::mono(SIZE_LARGE),
             fade(theme::TEXT_PRIMARY, alpha),
         );

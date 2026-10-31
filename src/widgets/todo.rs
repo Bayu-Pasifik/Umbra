@@ -105,8 +105,12 @@ impl Widget for Todo {
             } else {
                 dim
             };
-            ui.painter()
-                .rect_stroke(box_rect, 4.0, Stroke::new(icons::STROKE, stroke_color), egui::StrokeKind::Inside);
+            ui.painter().rect_stroke(
+                box_rect,
+                4.0,
+                Stroke::new(icons::STROKE, stroke_color),
+                egui::StrokeKind::Inside,
+            );
             if item.done {
                 ui.painter()
                     .rect_filled(box_rect.shrink(3.0), 2.0, fade(theme::ACCENT, alpha));
@@ -165,7 +169,6 @@ impl Widget for Todo {
             response.request_focus();
         }
     }
-
 }
 
 #[cfg(test)]

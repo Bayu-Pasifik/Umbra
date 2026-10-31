@@ -67,10 +67,3 @@ pub fn drop(p: &Painter, c: Pos2, s: f32, color: Color32) {
         Stroke::new(STROKE, color),
     ));
 }
-
-/// Filled variant of the drop, used for the water goal progress.
-pub fn drop_filled(p: &Painter, c: Pos2, s: f32, color: Color32) {
-    drop(p, c, s, color);
-    let r = s * 0.34;
-    p.circle_filled(pos2(c.x, c.y + s * 0.16), r - STROKE * 0.5, color);
-}
