@@ -1,6 +1,8 @@
 //! Umbra: a Nusa-style dynamic island for the desktop.
 
 mod pill;
+#[allow(dead_code)] // wired up in task 5
+mod spring;
 mod theme;
 
 use eframe::egui;
