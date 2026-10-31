@@ -13,6 +13,10 @@ eframe = { version = "0.31", default-features = false, features = [
     "x11",
 ] }
 
+# Drag-out needs OS drag-and-drop APIs; Linux has no winit-compatible backend (GTK only).
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
+drag = "2.1.1"
+
 [profile.release]
 opt-level = "s"
 lto = true

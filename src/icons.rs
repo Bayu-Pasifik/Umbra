@@ -184,3 +184,28 @@ pub fn caps_lock(p: &Painter, c: Pos2, s: f32, on: bool, color: Color32) {
     let bar = Rect::from_center_size(pos2(c.x, c.y + s * 0.42), Vec2::new(s * 0.34, bar_h));
     p.rect_filled(bar, 1.0, color);
 }
+
+/// File page with a folded corner.
+pub fn file(p: &Painter, c: Pos2, s: f32, color: Color32) {
+    let (w, h, fold) = (s * 0.7, s, s * 0.28);
+    let l = c.x - w / 2.0;
+    let r = c.x + w / 2.0;
+    let t = c.y - h / 2.0;
+    let b = c.y + h / 2.0;
+    let outline = vec![
+        pos2(l, t),
+        pos2(r - fold, t),
+        pos2(r, t + fold),
+        pos2(r, b),
+        pos2(l, b),
+    ];
+    let stroke = Stroke::new(STROKE, color);
+    p.add(Shape::Path(eframe::epaint::PathShape {
+        points: outline,
+        closed: true,
+        fill: Color32::TRANSPARENT,
+        stroke: stroke.into(),
+    }));
+    p.line_segment([pos2(r - fold, t), pos2(r - fold, t + fold)], stroke);
+    p.line_segment([pos2(r - fold, t + fold), pos2(r, t + fold)], stroke);
+}

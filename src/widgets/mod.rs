@@ -3,6 +3,7 @@
 pub mod clock;
 pub mod music;
 pub mod pomodoro;
+pub mod shelf;
 pub mod todo;
 pub mod water;
 

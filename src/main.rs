@@ -2,6 +2,7 @@
 
 mod alert;
 mod content;
+mod dragout;
 mod icons;
 #[allow(dead_code)] // state/alpha consumed by later tasks
 mod island;
@@ -20,9 +21,10 @@ use alert::AlertQueue;
 use content::{DemoEvents, EventSource};
 use island::Island;
 use mascot::Mascot;
-use widget::{PageStack, Widget as _};
+use widget::{PageStack, Request, Widget as _};
 use widgets::{
-    clock::Clock, music::Music, pomodoro::Pomodoro, todo::Todo, water::Water, SIZE_MEDIUM,
+    clock::Clock, music::Music, pomodoro::Pomodoro, shelf::Shelf, todo::Todo, water::Water,
+    SIZE_MEDIUM,
 };
 
 /// Initial overlay window size: the collapsed pill.
@@ -43,6 +45,8 @@ struct UmbraApp {
     mascot: Mascot,
     /// Last time the user or an alert touched the island.
     last_active: f64,
+    /// Files are being dragged over the window.
+    file_hover: bool,
     /// Last window size sent to the OS, to avoid redundant resize commands.
     window_size: egui::Vec2,
     /// Last window x position sent to the OS.
@@ -59,6 +63,7 @@ impl UmbraApp {
             Box::new(Pomodoro::new()),
             Box::new(Water::new()),
             Box::new(Todo::new()),
+            Box::new(Shelf::new()),
         ];
         Self {
             island: Island::new(),
@@ -68,6 +73,7 @@ impl UmbraApp {
             clock: Clock::new(),
             mascot: Mascot::new(),
             last_active: 0.0,
+            file_hover: false,
             window_size: WINDOW_SIZE,
             window_x: None,
             scroll_accum: 0.0,
@@ -166,7 +172,7 @@ impl UmbraApp {
         let hovered = ui
             .input(|i| i.pointer.hover_pos())
             .is_some_and(|p| rect.contains(p));
-        self.island.set_hovered(hovered, now);
+        self.island.set_hovered(hovered || self.file_hover, now);
 
         // Collapsed face: the clock, fading out as the pill opens.
         let collapsed_alpha = (1.0 - self.island.progress() * 2.5).clamp(0.0, 1.0);
@@ -213,8 +219,25 @@ impl eframe::App for UmbraApp {
         egui::Rgba::TRANSPARENT.to_array()
     }
 
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         let (dt, now) = ctx.input(|i| (i.stable_dt, i.time));
+        // Files dragged over the island open the shelf; dropped files land on it.
+        let (dropped, hovering) = ctx.input(|i| {
+            let dropped: Vec<std::path::PathBuf> = i
+                .raw
+                .dropped_files
+                .iter()
+                .filter_map(|f| f.path.clone())
+                .collect();
+            (dropped, !i.raw.hovered_files.is_empty())
+        });
+        if hovering && !self.file_hover {
+            self.pages.offer_files(&[]);
+        }
+        self.file_hover = hovering;
+        if !dropped.is_empty() {
+            self.pages.offer_files(&dropped);
+        }
         for event in self.events.poll(now) {
             self.alerts.push(event, now);
         }
@@ -236,6 +259,10 @@ impl eframe::App for UmbraApp {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| self.draw_island(ui, now));
+
+        if let Some(Request::DragOut(files)) = self.pages.take_request() {
+            dragout::start(frame, files);
+        }
 
         // Wake up again when the pending collapse is due.
         if let Some(remaining) = self.island.leave_remaining(now) {

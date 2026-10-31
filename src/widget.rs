@@ -4,6 +4,13 @@
 
 use eframe::egui::{self, Vec2};
 
+/// Something a page asks the app to do on its behalf.
+#[derive(Debug, Clone)]
+pub enum Request {
+    /// Start an OS drag-and-drop of these files out of the island.
+    DragOut(Vec<std::path::PathBuf>),
+}
+
 /// One content page shown inside the expanded island.
 pub trait Widget {
     /// Short page name, used for debugging and accessibility.
@@ -20,6 +27,16 @@ pub trait Widget {
     /// Handle global input such as keyboard shortcuts. Returns true if consumed.
     fn input(&mut self, _input: &egui::InputState) -> bool {
         false
+    }
+
+    /// Offer files dropped onto the island. Returns true if this page took them.
+    fn accept_files(&mut self, _paths: &[std::path::PathBuf]) -> bool {
+        false
+    }
+
+    /// Take a pending request made during `draw`, if any.
+    fn take_request(&mut self) -> Option<Request> {
+        None
     }
 
     /// Advance timers. `now` is the egui clock in seconds.
@@ -122,6 +139,22 @@ impl PageStack {
                 .id_salt(("in", self.current)),
         );
         self.pages[self.current].draw(&mut child, alpha * t);
+    }
+
+    /// Offer dropped files to the pages; the first page that takes them is shown.
+    pub fn offer_files(&mut self, paths: &[std::path::PathBuf]) -> bool {
+        for i in 0..self.pages.len() {
+            if self.pages[i].accept_files(paths) {
+                self.select(i);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Take a pending request from the visible page.
+    pub fn take_request(&mut self) -> Option<Request> {
+        self.pages[self.current].take_request()
     }
 
     /// Tick every page so background timers (Pomodoro, water) keep running.
