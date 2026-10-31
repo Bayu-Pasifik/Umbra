@@ -84,6 +84,11 @@ impl PageStack {
         }
     }
 
+    /// Wake request of the visible page only.
+    pub fn current_wake(&self, now: f64) -> Option<f64> {
+        self.pages[self.current].next_wake(now)
+    }
+
     /// Earliest wake request across all pages.
     pub fn next_wake(&self, now: f64) -> Option<f64> {
         self.pages
