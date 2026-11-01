@@ -72,8 +72,10 @@ pub fn clean_title(title: &str) -> String {
 /// the reported artist is just the channel name.
 pub fn guess_names(track: &Track) -> (String, String) {
     let title = clean_title(&track.title);
-    if let Some((artist, song)) = title.split_once(" - ") {
-        return (song.trim().to_string(), artist.trim().to_string());
+    for sep in [" - ", " – ", " — ", " ‒ ", " | "] {
+        if let Some((artist, song)) = title.split_once(sep) {
+            return (song.trim().to_string(), artist.trim().to_string());
+        }
     }
     let artist = track
         .artist
@@ -84,7 +86,90 @@ pub fn guess_names(track: &Track) -> (String, String) {
     (title, artist)
 }
 
+/// Fallback source (NetEase) for when LRCLIB is down or lacks the song.
+fn fetch_netease(track: &Track) -> Option<Vec<Line>> {
+    let (title, artist) = guess_names(track);
+    let agent = ureq::AgentBuilder::new()
+        .timeout(Duration::from_secs(6))
+        .user_agent("Mozilla/5.0")
+        .build();
+    let found: serde_json::Value = agent
+        .get("https://music.163.com/api/search/get")
+        .query("s", &format!("{title} {artist}"))
+        .query("type", "1")
+        .query("limit", "6")
+        .call()
+        .ok()?
+        .into_json()
+        .ok()?;
+    let songs = found.get("result")?.get("songs")?.as_array()?;
+    let artist_lc = artist.to_lowercase();
+    // Prefer songs by the right artist and of about the right length.
+    let mut ranked: Vec<(&serde_json::Value, bool, f64)> = songs
+        .iter()
+        .map(|s| {
+            let by = s
+                .get("artists")
+                .and_then(|a| a.as_array())
+                .is_some_and(|a| {
+                    a.iter().any(|x| {
+                        x.get("name").and_then(|n| n.as_str()).is_some_and(|n| {
+                            let n = n.to_lowercase();
+                            !artist_lc.is_empty()
+                                && (artist_lc.contains(&n) || n.contains(&artist_lc))
+                        })
+                    })
+                });
+            let d = s.get("duration").and_then(|d| d.as_f64()).unwrap_or(0.0) / 1000.0;
+            let diff = if track.duration > 0.0 && d > 0.0 {
+                (d - track.duration).abs()
+            } else {
+                0.0
+            };
+            (s, by, diff)
+        })
+        .collect();
+    ranked.sort_by(|a, b| b.1.cmp(&a.1).then(a.2.total_cmp(&b.2)));
+    let norm = |s: &str| {
+        s.to_lowercase()
+            .chars()
+            .filter(|c| c.is_alphanumeric())
+            .collect::<String>()
+    };
+    let want = norm(&title);
+    for (song, by_artist, diff) in ranked.into_iter().take(6) {
+        // Wrong lyrics are worse than none: demand a title match, a matching artist
+        // when one is known, and a similar length.
+        let name = norm(song.get("name").and_then(|n| n.as_str()).unwrap_or(""));
+        let title_ok =
+            !want.is_empty() && !name.is_empty() && (name.contains(&want) || want.contains(&name));
+        if !title_ok || (!artist_lc.is_empty() && !by_artist) || diff > 8.0 {
+            continue;
+        }
+        let id = song.get("id")?.as_i64()?.to_string();
+        let lyric: Option<serde_json::Value> = agent
+            .get("https://music.163.com/api/song/lyric")
+            .query("id", &id)
+            .query("lv", "1")
+            .call()
+            .ok()
+            .and_then(|r| r.into_json().ok());
+        let lines = lyric
+            .as_ref()
+            .and_then(|v| v.get("lrc")?.get("lyric")?.as_str().map(parse_lrc))
+            .filter(|l| !l.is_empty());
+        if lines.is_some() {
+            return lines;
+        }
+    }
+    None
+}
+
 fn fetch(track: &Track) -> Option<Vec<Line>> {
+    fetch_lrclib(track).or_else(|| fetch_netease(track))
+}
+
+fn fetch_lrclib(track: &Track) -> Option<Vec<Line>> {
     let (title, artist) = guess_names(track);
     let agent = ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(6))
@@ -108,20 +193,45 @@ fn fetch(track: &Track) -> Option<Vec<Line>> {
         }
     }
 
-    let results: Vec<serde_json::Value> = agent
-        .get("https://lrclib.net/api/search")
-        .query("q", &format!("{title} {artist}"))
-        .call()
-        .ok()?
-        .into_json()
-        .ok()?;
-    results
-        .iter()
-        .filter(|r| {
-            let d = r.get("duration").and_then(|d| d.as_f64()).unwrap_or(0.0);
-            track.duration <= 0.0 || (d - track.duration).abs() <= 6.0
-        })
-        .find_map(synced)
+    // Looser queries and duration tolerances; first hit with synced lyrics wins.
+    let queries = [
+        format!("{title} {artist}"),
+        title.clone(),
+        clean_title(&track.title),
+    ];
+    for q in queries.iter().filter(|q| !q.trim().is_empty()) {
+        let Some(results) = agent
+            .get("https://lrclib.net/api/search")
+            .query("q", q)
+            .call()
+            .ok()
+            .and_then(|r| r.into_json::<Vec<serde_json::Value>>().ok())
+        else {
+            continue;
+        };
+        let want = title.to_lowercase();
+        for tolerance in [4.0, 10.0] {
+            let hit = results.iter().find_map(|r| {
+                let d = r.get("duration").and_then(|d| d.as_f64()).unwrap_or(0.0);
+                if track.duration > 0.0 && d > 0.0 && (d - track.duration).abs() > tolerance {
+                    return None;
+                }
+                let name = r
+                    .get("trackName")
+                    .and_then(|n| n.as_str())
+                    .unwrap_or("")
+                    .to_lowercase();
+                if name.is_empty() || !(name.contains(&want) || want.contains(&name)) {
+                    return None;
+                }
+                synced(r)
+            });
+            if hit.is_some() {
+                return hit;
+            }
+        }
+    }
+    None
 }
 
 fn synced(v: &serde_json::Value) -> Option<Vec<Line>> {
@@ -134,6 +244,8 @@ fn synced(v: &serde_json::Value) -> Option<Vec<Line>> {
 struct Slot {
     key: String,
     lines: Option<Vec<Line>>,
+    busy: bool,
+    failed_at: Option<std::time::Instant>,
 }
 
 /// Lyrics for the current track, fetched in the background.
@@ -144,8 +256,6 @@ pub struct Lyrics {
 }
 
 pub struct LyricView {
-    pub current: Option<String>,
-    pub next: Option<String>,
     pub next_time: Option<f64>,
 }
 
@@ -167,10 +277,20 @@ impl Lyrics {
         {
             let mut slot = self.slot.lock().unwrap();
             if slot.key == key {
-                return;
+                // Retry a failed lookup (network blip) after a pause.
+                let retry = slot.lines.is_none()
+                    && !slot.busy
+                    && slot
+                        .failed_at
+                        .is_some_and(|t| t.elapsed() > Duration::from_secs(20));
+                if !retry {
+                    return;
+                }
             }
             slot.key = key.clone();
             slot.lines = None;
+            slot.busy = true;
+            slot.failed_at = None;
         }
         let slot = Arc::clone(&self.slot);
         let ctx = self.ctx.clone();
@@ -179,9 +299,22 @@ impl Lyrics {
             .name("umbra-lyrics".into())
             .spawn(move || {
                 let lines = fetch(&track);
+                if std::env::var_os("UMBRA_DEBUG_LYRICS").is_some() {
+                    eprintln!(
+                        "umbra: lyrics for {:?} / {:?} ({}s): {}",
+                        track.title,
+                        track.artist,
+                        track.duration,
+                        lines.as_ref().map_or(0, Vec::len)
+                    );
+                }
                 let mut slot = slot.lock().unwrap();
                 // Ignore the answer if the song changed while we were waiting.
                 if slot.key == key {
+                    slot.busy = false;
+                    if lines.is_none() {
+                        slot.failed_at = Some(std::time::Instant::now());
+                    }
                     slot.lines = lines;
                     drop(slot);
                     ctx.request_repaint();
@@ -192,6 +325,37 @@ impl Lyrics {
         }
     }
 
+    /// True once a lookup has finished without finding lyrics (a retry may follow).
+    pub fn not_found(&self) -> bool {
+        let slot = self.slot.lock().unwrap();
+        !slot.busy && slot.lines.is_none() && slot.failed_at.is_some()
+    }
+
+    /// `before` lines, the current line, then `after` lines around `position`. Slots
+    /// outside the song are `None`. Index `before` is the current line.
+    pub fn window(
+        &self,
+        position: f64,
+        before: usize,
+        after: usize,
+    ) -> Option<Vec<Option<String>>> {
+        let slot = self.slot.lock().unwrap();
+        let lines = slot.lines.as_ref()?;
+        // Before the first line, treat the cursor as sitting just ahead of line 0.
+        let cur = current_index(lines, position).map_or(-1, |i| i as isize);
+        Some(
+            (0..before + 1 + after)
+                .map(|k| {
+                    let i = cur + k as isize - before as isize;
+                    usize::try_from(i)
+                        .ok()
+                        .and_then(|i| lines.get(i))
+                        .map(|l| l.text.clone())
+                })
+                .collect(),
+        )
+    }
+
     /// Current and next lyric line at `position`, plus the time the next line starts.
     pub fn at(&self, position: f64) -> Option<LyricView> {
         let slot = self.slot.lock().unwrap();
@@ -199,8 +363,6 @@ impl Lyrics {
         let idx = current_index(lines, position);
         let next = idx.map_or(0, |i| i + 1);
         Some(LyricView {
-            current: idx.map(|i| lines[i].text.clone()).filter(|t| !t.is_empty()),
-            next: lines.get(next).map(|l| l.text.clone()),
             next_time: lines.get(next).map(|l| l.time),
         })
     }
@@ -249,5 +411,14 @@ mod tests {
             duration: 258.0,
         };
         assert_eq!(guess_names(&t2), ("Nightcall".into(), "Kavinsky".into()));
+        let t3 = Track {
+            title: "Maroon 5, Wiz Khalifa – Payphone (Lyrics)".into(),
+            artist: "Latin City".into(),
+            duration: 231.0,
+        };
+        assert_eq!(
+            guess_names(&t3),
+            ("Payphone".into(), "Maroon 5, Wiz Khalifa".into())
+        );
     }
 }

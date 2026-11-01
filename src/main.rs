@@ -72,6 +72,7 @@ struct UmbraApp {
 
 impl UmbraApp {
     fn new(ctx: &egui::Context) -> Self {
+        install_cjk_fonts(ctx);
         let fullscreen = fullscreen::spawn(ctx.clone());
         let pages: Vec<Box<dyn widget::Widget>> = vec![
             Box::new(Clock::new()),
@@ -248,11 +249,11 @@ impl UmbraApp {
         if alpha > 0.0 {
             let content = egui::Rect::from_min_size(
                 egui::pos2(
-                    rect.center().x - theme::EXPANDED_WIDTH / 2.0 + CONTENT_PADDING.x,
+                    rect.center().x - self.island.expanded_width() / 2.0 + CONTENT_PADDING.x,
                     rect.top() + CONTENT_PADDING.y,
                 ),
                 egui::vec2(
-                    theme::EXPANDED_WIDTH - 2.0 * CONTENT_PADDING.x,
+                    self.island.expanded_width() - 2.0 * CONTENT_PADDING.x,
                     theme::EXPANDED_HEIGHT - 2.0 * CONTENT_PADDING.y,
                 ),
             );
@@ -313,6 +314,8 @@ impl eframe::App for UmbraApp {
         self.alerts.update(now);
         self.island.set_forced(self.alerts.is_active());
         self.hidden = self.fullscreen.load(std::sync::atomic::Ordering::Relaxed);
+        let page_w = self.pages.page(self.pages.current_index()).size().x;
+        self.island.set_expanded_width(page_w);
         self.island.update(dt);
         let active =
             self.island.wants_expanded() || self.island.is_animating() || self.alerts.is_active();
@@ -378,6 +381,31 @@ impl eframe::App for UmbraApp {
 /// GPU setup tuned for a tiny always-on overlay: the native low-power backend only,
 /// Music page backed by the real system media session where available.
 /// `UMBRA_MOCK_MEDIA=1` forces the built-in mock playlist instead.
+/// Add system CJK fonts as fallbacks so Japanese, Chinese and Korean lyrics render.
+/// Missing files are skipped; the built-in fonts still come first.
+fn install_cjk_fonts(ctx: &egui::Context) {
+    let dir = std::env::var_os("WINDIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| "C:\\Windows".into())
+        .join("Fonts");
+    let mut fonts = egui::FontDefinitions::default();
+    for (name, file) in [("cjk-zh-ja", "msyh.ttc"), ("cjk-ko", "malgun.ttf")] {
+        let Ok(bytes) = std::fs::read(dir.join(file)) else {
+            continue;
+        };
+        fonts.font_data.insert(
+            name.to_string(),
+            std::sync::Arc::new(egui::FontData::from_owned(bytes)),
+        );
+        for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+            if let Some(list) = fonts.families.get_mut(&family) {
+                list.push(name.to_string());
+            }
+        }
+    }
+    ctx.set_fonts(fonts);
+}
+
 fn music_page(ctx: &egui::Context) -> Music {
     #[cfg(windows)]
     if std::env::var_os("UMBRA_MOCK_MEDIA").is_none() {

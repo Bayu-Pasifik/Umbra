@@ -26,6 +26,8 @@ pub struct Island {
     forced: bool,
     /// Time (seconds) at which the pointer left while expanded.
     leave_since: Option<f64>,
+    /// Width when expanded; the current page may ask for more than the default.
+    expanded_w: f32,
 }
 
 impl Island {
@@ -38,14 +40,29 @@ impl Island {
             hover_open: false,
             forced: false,
             leave_since: None,
+            expanded_w: theme::EXPANDED_WIDTH,
         }
+    }
+
+    /// Set the width used when expanded (the current page's preferred width).
+    pub fn set_expanded_width(&mut self, w: f32) {
+        if (w - self.expanded_w).abs() > f32::EPSILON {
+            self.expanded_w = w;
+            if self.want_expanded {
+                self.width.set_target(w);
+            }
+        }
+    }
+
+    pub fn expanded_width(&self) -> f32 {
+        self.expanded_w
     }
 
     pub fn set_expanded(&mut self, expanded: bool) {
         self.want_expanded = expanded;
         let (w, h, r) = if expanded {
             (
-                theme::EXPANDED_WIDTH,
+                self.expanded_w,
                 theme::EXPANDED_HEIGHT,
                 theme::EXPANDED_RADIUS,
             )

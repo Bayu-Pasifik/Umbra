@@ -13,7 +13,11 @@ use crate::theme;
 use crate::widget::Widget;
 
 /// Longest lyric line shown before it is cut with an ellipsis.
-const MAX_LYRIC_CHARS: usize = 46;
+const MAX_LYRIC_CHARS: usize = 30;
+/// Width of the left column (track info and controls); lyrics fill the rest.
+const LEFT_WIDTH: f32 = 220.0;
+/// Music page is wider than the others to make room for the lyrics column.
+const PAGE_WIDTH: f32 = 580.0;
 
 pub struct Music {
     source: Box<dyn ContentSource>,
@@ -47,7 +51,7 @@ impl Widget for Music {
     }
 
     fn size(&self) -> Vec2 {
-        egui::vec2(theme::EXPANDED_WIDTH, theme::EXPANDED_HEIGHT)
+        egui::vec2(PAGE_WIDTH, theme::EXPANDED_HEIGHT)
     }
 
     fn tick(&mut self, now: f64) {
@@ -81,7 +85,7 @@ impl Widget for Music {
             ui,
             pos2(rect.left(), rect.top() + 12.0),
             Align2::LEFT_CENTER,
-            &truncate(&track.title, 38),
+            &truncate(&track.title, 24),
             sans(SIZE_MEDIUM),
             white,
         );
@@ -89,36 +93,64 @@ impl Widget for Music {
             ui,
             pos2(rect.left(), rect.top() + 32.0),
             Align2::LEFT_CENTER,
-            &truncate(&track.artist, 46),
+            &truncate(&track.artist, 28),
             sans(SIZE_SMALL),
             dim,
         );
 
-        // Synced lyrics: the line being sung, then the one after it.
-        if let Some(view) = self.lyrics.as_ref().and_then(|l| l.at(position)) {
-            if let Some(current) = view.current {
-                text(
-                    ui,
-                    pos2(rect.center().x, rect.top() + 62.0),
-                    Align2::CENTER_CENTER,
-                    &truncate(&current, MAX_LYRIC_CHARS),
-                    sans(SIZE_MEDIUM),
-                    fade(theme::ACCENT, alpha),
-                );
+        // Right half: lyrics scroll, the current line bright and the rest fading out.
+        let lyric_x = rect.left() + LEFT_WIDTH + 24.0;
+        let lyric_w = rect.right() - lyric_x;
+        ui.painter().line_segment(
+            [
+                pos2(lyric_x - 12.0, rect.top() + 8.0),
+                pos2(lyric_x - 12.0, rect.bottom() - 8.0),
+            ],
+            egui::Stroke::new(1.0_f32, fade(theme::TRACK, alpha)),
+        );
+        let lyric_center = pos2(lyric_x + lyric_w / 2.0, rect.center().y);
+        match self.lyrics.as_ref().and_then(|l| l.window(position, 2, 2)) {
+            Some(rows) => {
+                for (k, row) in rows.iter().enumerate() {
+                    let Some(line) = row.as_deref().filter(|t| !t.is_empty()) else {
+                        continue;
+                    };
+                    let dist = (k as i32 - 2).unsigned_abs();
+                    let (color, size) = match dist {
+                        0 => (fade(theme::ACCENT, alpha), SIZE_MEDIUM),
+                        1 => (fade(theme::TEXT_SECONDARY, alpha), SIZE_SMALL),
+                        _ => (fade(theme::TEXT_SECONDARY, alpha * 0.45), SIZE_SMALL),
+                    };
+                    text(
+                        ui,
+                        pos2(lyric_center.x, lyric_center.y + (k as f32 - 2.0) * 28.0),
+                        Align2::CENTER_CENTER,
+                        &truncate(line, MAX_LYRIC_CHARS),
+                        sans(size),
+                        color,
+                    );
+                }
             }
-            if let Some(next) = view.next {
+            None => {
+                let msg = match &self.lyrics {
+                    None => "Lyrics unavailable",
+                    Some(l) if l.not_found() => "No synced lyrics found",
+                    Some(_) => "Looking for lyrics…",
+                };
                 text(
                     ui,
-                    pos2(rect.center().x, rect.top() + 84.0),
+                    lyric_center,
                     Align2::CENTER_CENTER,
-                    &truncate(&next, MAX_LYRIC_CHARS),
+                    msg,
                     sans(SIZE_SMALL),
                     dim,
                 );
             }
         }
 
-        // Progress bar with elapsed / total times.
+        // Left half: progress bar with elapsed / total times.
+        let left = Rect::from_min_size(rect.min, egui::vec2(LEFT_WIDTH, rect.height()));
+        let rect = left;
         let bar_y = rect.top() + 104.0;
         let bar = Rect::from_min_size(pos2(rect.left(), bar_y), egui::vec2(rect.width(), 4.0));
         let fraction = if track.duration > 0.0 {
